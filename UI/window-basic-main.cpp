@@ -1430,7 +1430,7 @@ void OBSBasic::InitOBSCallbacks()
 {
 	ProfileScope("OBSBasic::InitOBSCallbacks");
 
-	signalHandlers.reserve(signalHandlers.size() + 7);
+	signalHandlers.reserve(signalHandlers.size() + 8);
 	signalHandlers.emplace_back(obs_get_signal_handler(), "source_create",
 				    OBSBasic::SourceCreated, this);
 	signalHandlers.emplace_back(obs_get_signal_handler(), "source_remove",
@@ -1448,6 +1448,9 @@ void OBSBasic::InitOBSCallbacks()
 				    OBSBasic::SourceAudioDeactivated, this);
 	signalHandlers.emplace_back(obs_get_signal_handler(), "source_rename",
 				    OBSBasic::SourceRenamed, this);
+	signalHandlers.emplace_back(obs_get_signal_handler(),
+				    "transition_to_next_scene",
+				    OBSBasic::TransitionToNextScene, this);
 }
 
 void OBSBasic::InitPrimitives()
@@ -3460,6 +3463,26 @@ void OBSBasic::SourceRenamed(void *data, calldata_t *params)
 				  Q_ARG(QString, QT_UTF8(prevName)));
 
 	blog(LOG_INFO, "Source '%s' renamed to '%s'", prevName, newName);
+}
+
+void OBSBasic::TransitionToNextScene(void *data, calldata_t *params)
+{
+	obs_source_t *currentScene = obs_frontend_get_current_scene();
+	if (currentScene) {
+		struct obs_frontend_source_list scenes = {0};
+		obs_frontend_get_scenes(&scenes);
+		for (int i = 0; i < scenes.sources.num; i++) {
+			if (currentScene == scenes.sources.array[i] &&
+			    (i + 1) < scenes.sources.num) {
+				obs_frontend_set_current_scene(
+					scenes.sources.array[i+1]);
+			}
+		}
+		obs_frontend_source_list_free(&scenes);
+		obs_source_release(currentScene);
+	}
+	UNUSED_PARAMETER(data);
+	UNUSED_PARAMETER(params);
 }
 
 void OBSBasic::DrawBackdrop(float cx, float cy)

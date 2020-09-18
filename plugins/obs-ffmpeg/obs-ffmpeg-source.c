@@ -13,7 +13,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
 #include <obs-module.h>
 #include <util/platform.h>
 #include <util/dstr.h>
@@ -30,6 +29,12 @@
 	     obs_source_get_name(source), ##__VA_ARGS__)
 #define FF_BLOG(level, format, ...) \
 	FF_LOG_S(s->source, level, format, ##__VA_ARGS__)
+
+typedef enum {
+	INACTIVE,
+	WAIT_FOR_END,
+	WAIT_FOR_TRANSITION
+} transitionToNextScene_t;
 
 struct ffmpeg_source {
 	mp_media_t media;
@@ -58,6 +63,13 @@ struct ffmpeg_source {
 	bool close_when_inactive;
 	bool seekable;
 
+	bool transition_to_next_scene_at_end;
+	transitionToNextScene_t transition_status;
+	//int64_t transition_time;
+	pthread_t transition_thread;
+	os_event_t *abort_transition_at_end;
+	float transition_time;
+
 	enum obs_media_state state;
 	obs_hotkey_pair_id play_pause_hotkey;
 	obs_hotkey_id stop_hotkey;
@@ -85,6 +97,8 @@ static bool is_local_file_modified(obs_properties_t *props,
 		obs_properties_get(props, "close_when_inactive");
 	obs_property_t *seekable = obs_properties_get(props, "seekable");
 	obs_property_t *speed = obs_properties_get(props, "speed_percent");
+	obs_property_t *transition_to_next_scene_at_end =
+		obs_properties_get(props, "transition_to_next_scene_at_end");
 	obs_property_set_visible(input, !enabled);
 	obs_property_set_visible(input_format, !enabled);
 	obs_property_set_visible(buffering, !enabled);
@@ -93,6 +107,7 @@ static bool is_local_file_modified(obs_properties_t *props,
 	obs_property_set_visible(looping, enabled);
 	obs_property_set_visible(speed, enabled);
 	obs_property_set_visible(seekable, !enabled);
+	obs_property_set_visible(transition_to_next_scene_at_end, enabled);
 
 	return true;
 }
@@ -105,6 +120,8 @@ static void ffmpeg_source_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "restart_on_activate", true);
 	obs_data_set_default_int(settings, "buffering_mb", 2);
 	obs_data_set_default_int(settings, "speed_percent", 100);
+	obs_data_set_default_bool(settings, "transition_to_next_scene_at_end",
+				  false);
 }
 
 static const char *media_filter =
@@ -181,6 +198,10 @@ static obs_properties_t *ffmpeg_source_getproperties(void *data)
 
 	obs_properties_add_bool(props, "clear_on_media_end",
 				obs_module_text("ClearOnMediaEnd"));
+
+	obs_properties_add_bool(
+		props, "transition_to_next_scene_at_end",
+		obs_module_text("TransitionToNextSceneWhenPlaybackEnds"));
 
 	prop = obs_properties_add_bool(
 		props, "close_when_inactive",
@@ -265,6 +286,12 @@ static void media_stopped(void *opaque)
 
 	set_media_state(s, OBS_MEDIA_STATE_ENDED);
 	obs_source_media_ended(s->source);
+
+	if (s->transition_to_next_scene_at_end) {
+		//s->transition_status = WAIT_FOR_TRANSITION;
+		os_event_signal(s->abort_transition_at_end);
+	}
+
 }
 
 static void ffmpeg_source_open(struct ffmpeg_source *s)
@@ -285,21 +312,50 @@ static void ffmpeg_source_open(struct ffmpeg_source *s)
 			.is_local_file = s->is_local_file || s->seekable};
 
 		s->media_valid = mp_media_init(&s->media, &info);
+
+		/*
+		s->transition_status = s->transition_to_next_scene_at_end
+					       ? WAIT_FOR_TRANSITION
+					       : INACTIVE;*/
 	}
 }
 
 static void ffmpeg_source_tick(void *data, float seconds)
 {
-	UNUSED_PARAMETER(seconds);
+	//UNUSED_PARAMETER(seconds);
 
 	struct ffmpeg_source *s = data;
 	if (s->destroy_media) {
 		if (s->media_valid) {
+			if (s->transition_status == WAIT_FOR_END) {
+				os_event_signal(s->abort_transition_at_end);
+				pthread_join(s->transition_thread, NULL);
+			}
+			os_event_destroy(s->abort_transition_at_end);
 			mp_media_free(&s->media);
 			s->media_valid = false;
 		}
 		s->destroy_media = false;
 	}
+
+}
+
+static void *transition_thread(void *data)
+{
+	struct ffmpeg_source *s = data;
+	s->transition_status = WAIT_FOR_END;
+
+	// TODO: Get the transition duration and divide by 2 (300mS / 2 = 0.15 sec)
+	// 300mS is the default for crossfades
+	if (os_event_timedwait(s->abort_transition_at_end,
+			       (unsigned long)((s->media.fmt->duration / 1000) -
+				       150)) ==
+		    ETIMEDOUT &&
+	    s->transition_status == WAIT_FOR_END) {
+		obs_source_transition_to_next_scene();
+	}
+	s->transition_status = WAIT_FOR_TRANSITION;
+	return NULL;
 }
 
 static void ffmpeg_source_start(struct ffmpeg_source *s)
@@ -313,6 +369,12 @@ static void ffmpeg_source_start(struct ffmpeg_source *s)
 			obs_source_show_preloaded_video(s->source);
 		set_media_state(s, OBS_MEDIA_STATE_PLAYING);
 		obs_source_media_started(s->source);
+		if (s->transition_to_next_scene_at_end &&
+		    s->media.fmt != NULL) {
+			os_event_reset(s->abort_transition_at_end);
+			pthread_create(&s->transition_thread, NULL,
+				       transition_thread, s);
+		}
 	}
 }
 
@@ -341,6 +403,9 @@ static void ffmpeg_source_update(void *data, obs_data_t *settings)
 		s->is_looping = false;
 		s->close_when_inactive = true;
 	}
+
+	s->transition_to_next_scene_at_end =
+		obs_data_get_bool(settings, "transition_to_next_scene_at_end");
 
 	s->input = input ? bstrdup(input) : NULL;
 	s->input_format = input_format ? bstrdup(input_format) : NULL;
@@ -530,6 +595,9 @@ static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 			 get_nb_frames, s);
 
 	ffmpeg_source_update(s, settings);
+
+	os_event_init(&s->abort_transition_at_end, OS_EVENT_TYPE_MANUAL);
+
 	return s;
 }
 

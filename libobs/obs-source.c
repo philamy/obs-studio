@@ -4957,3 +4957,17 @@ void obs_source_media_ended(obs_source_t *source)
 
 	obs_source_dosignal(source, NULL, "media_ended");
 }
+
+void obs_source_transition_to_next_scene()
+{
+	struct obs_core_data *data = &obs->data;
+	//pthread_mutex_unlock(&data->sources_mutex); // This is a hack to avoid deadlock with the sources_mutex already set from:
+          // F:\SBC\Tech\OBS\philamy\obs-studio\libobs\obs-video.c
+          // static uint64_t tick_sources(uint64_t cur_time, uint64_t last_time)
+	  // Otherwise we'll attempt to set it again from within:
+	  // F:\SBC\Tech\OBS\philamy\obs-studio\libobs\obs-source.c function obs_source_init_finalize which calls
+	  // F:\SBC\Tech\OBS\philamy\obs-studio\libobs\obs.c line 2216 function obs_context_data_insert
+	  // As signal_handler_signal is handled within this thread
+	signal_handler_signal(obs->signals, "transition_to_next_scene", NULL);
+	//pthread_mutex_lock(&data->sources_mutex);
+}

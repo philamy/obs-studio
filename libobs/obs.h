@@ -1349,6 +1349,7 @@ EXPORT void obs_source_media_set_time(obs_source_t *source, int64_t ms);
 EXPORT enum obs_media_state obs_source_media_get_state(obs_source_t *source);
 EXPORT void obs_source_media_started(obs_source_t *source);
 EXPORT void obs_source_media_ended(obs_source_t *source);
+EXPORT void obs_source_transition_to_next_scene();
 
 /* ------------------------------------------------------------------------- */
 /* Transition-specific functions */

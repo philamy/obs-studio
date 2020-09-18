@@ -728,7 +728,7 @@ static const char *obs_signals[] = {
 	"void hotkey_register(ptr hotkey)",
 	"void hotkey_unregister(ptr hotkey)",
 	"void hotkey_bindings_changed(ptr hotkey)",
-
+	"void transition_to_next_scene(ptr source)",
 	NULL,
 };
 
