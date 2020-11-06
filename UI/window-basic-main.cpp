@@ -360,8 +360,6 @@ OBSBasic::OBSBasic(QWidget *parent)
 
 	QPoint curPos;
 
-	UpdateContextBar();
-
 	//restore parent window geometry
 	const char *geometry = config_get_string(App()->GlobalConfig(),
 						 "BasicWindow", "geometry");
@@ -1303,6 +1301,7 @@ bool OBSBasic::InitBasicConfigDefaults()
 				true);
 	config_set_default_bool(basicConfig, "AdvOut", "UseRescale", false);
 	config_set_default_uint(basicConfig, "AdvOut", "TrackIndex", 1);
+	config_set_default_uint(basicConfig, "AdvOut", "VodTrackIndex", 2);
 	config_set_default_string(basicConfig, "AdvOut", "Encoder", "obs_x264");
 
 	config_set_default_string(basicConfig, "AdvOut", "RecType", "Standard");
@@ -1758,6 +1757,8 @@ void OBSBasic::OBSInit()
 					       "ShowContextToolbars");
 		ui->toggleContextBar->setChecked(visible);
 		ui->contextContainer->setVisible(visible);
+		if (visible)
+			UpdateContextBar(true);
 	} else {
 		ui->toggleContextBar->setChecked(true);
 		ui->contextContainer->setVisible(true);
@@ -2932,8 +2933,11 @@ static bool is_network_media_source(obs_source_t *source, const char *id)
 	return !is_local_file;
 }
 
-void OBSBasic::UpdateContextBar()
+void OBSBasic::UpdateContextBar(bool force)
 {
+	if (!ui->contextContainer->isVisible() && !force)
+		return;
+
 	OBSSceneItem item = GetCurrentSceneItem();
 
 	ClearContextBar();
@@ -7385,6 +7389,7 @@ void OBSBasic::on_toggleContextBar_toggled(bool visible)
 	config_set_bool(App()->GlobalConfig(), "BasicWindow",
 			"ShowContextToolbars", visible);
 	this->ui->contextContainer->setVisible(visible);
+	UpdateContextBar(true);
 }
 
 void OBSBasic::on_toggleStatusBar_toggled(bool visible)

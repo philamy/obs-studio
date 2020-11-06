@@ -278,7 +278,6 @@ configure_obs_build() {
         -DVLCPath="${DEPS_BUILD_DIR}/vlc-${VLC_VERSION:-${CI_VLC_VERSION}}" \
         -DBUILD_BROWSER=ON \
         -DBROWSER_DEPLOY=ON \
-        -DBUILD_CAPTIONS=ON \
         -DWITH_RTMPS=ON \
         -DCEF_ROOT_DIR="${DEPS_BUILD_DIR}/cef_binary_${CEF_BUILD_VERSION:-${CI_CEF_VERSION}}_macosx64" \
         -DCMAKE_BUILD_TYPE="${BUILD_CONFIG}" \
@@ -318,6 +317,7 @@ bundle_dylibs() {
         -x ./OBS.app/Contents/PlugIns/mac-decklink.so \
         -x ./OBS.app/Contents/PlugIns/mac-syphon.so \
         -x ./OBS.app/Contents/PlugIns/mac-vth264.so \
+        -x ./OBS.app/Contents/PlugIns/mac-virtualcam.so \
         -x ./OBS.app/Contents/PlugIns/obs-browser.so \
         -x ./OBS.app/Contents/PlugIns/obs-browser-page \
         -x ./OBS.app/Contents/PlugIns/obs-ffmpeg.so \
@@ -506,6 +506,11 @@ codesign_bundle() {
     codesign --force --options runtime --sign "${CODESIGN_IDENT}" "./OBS.app/Contents/Frameworks/Chromium Embedded Framework.framework/Libraries/libGLESv2.dylib"
     codesign --force --options runtime --sign "${CODESIGN_IDENT}" "./OBS.app/Contents/Frameworks/Chromium Embedded Framework.framework/Libraries/libswiftshader_libGLESv2.dylib"
     codesign --force --options runtime --sign "${CODESIGN_IDENT}" --deep "./OBS.app/Contents/Frameworks/Chromium Embedded Framework.framework"
+    echo -n "${COLOR_RESET}"
+
+    step "Code-sign DAL Plugin..."
+    echo -n "${COLOR_ORANGE}"
+    codesign --force --options runtime --deep --sign "${CODESIGN_IDENT}" "./OBS.app/Contents/Resources/data/obs-mac-virtualcam.plugin"
     echo -n "${COLOR_RESET}"
 
     step "Code-sign OBS code..."

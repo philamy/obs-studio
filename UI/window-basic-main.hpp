@@ -1024,7 +1024,7 @@ public slots:
 	bool ReplayBufferActive();
 
 	void ClearContextBar();
-	void UpdateContextBar();
+	void UpdateContextBar(bool force = false);
 
 public:
 	explicit OBSBasic(QWidget *parent = 0);
