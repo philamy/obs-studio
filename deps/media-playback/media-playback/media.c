@@ -500,6 +500,11 @@ static bool mp_media_reset(mp_media_t *m)
 	bool stopping;
 	bool active;
 
+	if (m->start_offset_ms != 0) {
+		m->fmt->start_time = m->start_offset_ms * 1000;
+	} else {
+		m->fmt->start_time = 0;
+	}
 	seek_to(m, m->fmt->start_time);
 
 	int64_t next_ts = mp_media_get_base_pts(m);
@@ -678,7 +683,10 @@ static inline bool mp_media_thread(mp_media_t *m)
 		return false;
 	}
 
+	bool just_activated = false;
+
 	for (;;) {
+
 		bool reset, kill, is_active, seek, pause, reset_time;
 		int64_t seek_pos;
 		bool timeout = false;
@@ -687,6 +695,19 @@ static inline bool mp_media_thread(mp_media_t *m)
 		is_active = m->active;
 		pause = m->pause;
 		pthread_mutex_unlock(&m->mutex);
+
+		if (is_active) {
+			if (!just_activated) {
+				m->start_cb(m->opaque);
+				just_activated = true;
+				/*if (m->start_offset_ms != 0) {
+					mp_media_seek_to(m, m->start_offset_ms);
+				}*/
+			}
+		} else {
+			just_activated = false;
+		}
+
 
 		if (!is_active || pause) {
 			if (os_sem_wait(m->sem) < 0)
@@ -707,9 +728,12 @@ static inline bool mp_media_thread(mp_media_t *m)
 		pause = m->pause;
 		seek_pos = m->seek_pos;
 		seek = m->seek;
-		reset_time = m->reset_ts;
-		m->seek = false;
-		m->reset_ts = false;
+		if (seek) {
+			m->seek = false;
+		} else {
+			reset_time = m->reset_ts;
+			m->reset_ts = false;
+		}
 
 		pthread_mutex_unlock(&m->mutex);
 
@@ -801,11 +825,15 @@ bool mp_media_init(mp_media_t *media, const struct mp_media_info *info)
 	media->a_cb = info->a_cb;
 	media->stop_cb = info->stop_cb;
 	media->v_seek_cb = info->v_seek_cb;
+	media->start_cb = info->start_cb;
+	media->seek_cb = info->seek_cb;
 	media->v_preload_cb = info->v_preload_cb;
 	media->force_range = info->force_range;
 	media->buffering = info->buffering;
 	media->speed = info->speed;
 	media->is_local_file = info->is_local_file;
+	media->start_offset_ms = info->start_offset_ms;
+	media->end_offset_ms = info->end_offset_ms;
 
 	if (!info->is_local_file || media->speed < 1 || media->speed > 200)
 		media->speed = 100;
@@ -878,6 +906,7 @@ void mp_media_play(mp_media_t *m, bool loop, bool reconnecting)
 	pthread_mutex_unlock(&m->mutex);
 
 	os_sem_post(m->sem);
+	//m->start_cb(m->opaque);
 }
 
 void mp_media_play_pause(mp_media_t *m, bool pause)
@@ -917,7 +946,12 @@ void mp_media_seek_to(mp_media_t *m, int64_t pos)
 		m->seek = true;
 		m->seek_pos = pos * 1000;
 	}
+
 	pthread_mutex_unlock(&m->mutex);
 
 	os_sem_post(m->sem);
+
+	if (m->is_local_file && m->active && m->seek_cb)
+		m->seek_cb(m->opaque, pos);
 }
+

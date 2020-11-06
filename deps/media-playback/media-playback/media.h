@@ -41,6 +41,8 @@ extern "C" {
 typedef void (*mp_video_cb)(void *opaque, struct obs_source_frame *frame);
 typedef void (*mp_audio_cb)(void *opaque, struct obs_source_audio *audio);
 typedef void (*mp_stop_cb)(void *opaque);
+typedef void (*mp_start_cb)(void *opaque);
+typedef void (*mp_seek_cb)(void *opaque, int64_t pos);
 
 struct mp_media {
 	AVFormatContext *fmt;
@@ -48,6 +50,8 @@ struct mp_media {
 	mp_video_cb v_preload_cb;
 	mp_video_cb v_seek_cb;
 	mp_stop_cb stop_cb;
+	mp_start_cb start_cb;
+	mp_seek_cb seek_cb;
 	mp_video_cb v_cb;
 	mp_audio_cb a_cb;
 	void *opaque;
@@ -101,6 +105,8 @@ struct mp_media {
 	bool seek;
 	bool seek_next_ts;
 	int64_t seek_pos;
+	int start_offset_ms;
+	int end_offset_ms;
 };
 
 typedef struct mp_media mp_media_t;
@@ -113,6 +119,8 @@ struct mp_media_info {
 	mp_video_cb v_seek_cb;
 	mp_audio_cb a_cb;
 	mp_stop_cb stop_cb;
+	mp_start_cb start_cb;
+	mp_seek_cb seek_cb;
 
 	const char *path;
 	const char *format;
@@ -121,6 +129,8 @@ struct mp_media_info {
 	enum video_range_type force_range;
 	bool hardware_decoding;
 	bool is_local_file;
+	int start_offset_ms;
+	int end_offset_ms;
 	bool reconnecting;
 };
 

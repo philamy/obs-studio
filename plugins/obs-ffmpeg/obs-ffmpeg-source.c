@@ -30,10 +30,13 @@
 #define FF_BLOG(level, format, ...) \
 	FF_LOG_S(s->source, level, format, ##__VA_ARGS__)
 
+#define DEFAULT_TRANSITION_END_TIME_MS 300
+
 typedef enum {
 	INACTIVE,
 	WAIT_FOR_END,
-	WAIT_FOR_TRANSITION
+	WAIT_FOR_TRANSITION,
+	SEEK_TO_POS
 } transitionToNextScene_t;
 
 struct ffmpeg_source {
@@ -65,16 +68,18 @@ struct ffmpeg_source {
 
 	bool transition_to_next_scene_at_end;
 	transitionToNextScene_t transition_status;
-	//int64_t transition_time;
 	pthread_t transition_thread;
 	os_event_t *abort_transition_at_end;
-	float transition_time;
 
 	pthread_t reconnect_thread;
 	bool stop_reconnect;
 	bool reconnect_thread_valid;
 	volatile bool reconnecting;
 	int reconnect_delay_sec;
+
+	int start_offset_ms;
+	int end_offset_ms;
+	int64_t seek_pos;
 
 	enum obs_media_state state;
 	obs_hotkey_pair_id play_pause_hotkey;
@@ -87,12 +92,17 @@ static void set_media_state(void *data, enum obs_media_state state)
 	s->state = state;
 }
 
-static bool is_local_file_modified(obs_properties_t *props,
-				   obs_property_t *prop, obs_data_t *settings)
+static bool is_prop_modified(obs_properties_t *props,
+				   obs_property_t *prop,
+			     obs_data_t *settings)
 {
 	UNUSED_PARAMETER(prop);
 
 	bool enabled = obs_data_get_bool(settings, "is_local_file");
+	bool b_looping = obs_data_get_bool(settings, "looping");
+	bool b_transition_to_next_scene_at_end =
+		obs_data_get_bool(settings, "transition_to_next_scene_at_end");
+
 	obs_property_t *input = obs_properties_get(props, "input");
 	obs_property_t *input_format =
 		obs_properties_get(props, "input_format");
@@ -103,6 +113,10 @@ static bool is_local_file_modified(obs_properties_t *props,
 	obs_property_t *speed = obs_properties_get(props, "speed_percent");
 	obs_property_t *transition_to_next_scene_at_end =
 		obs_properties_get(props, "transition_to_next_scene_at_end");
+	obs_property_t *start_offset_s =
+		obs_properties_get(props, "start_offset");
+	obs_property_t *end_offset_s = obs_properties_get(props, "end_offset");
+
 	obs_property_t *reconnect_delay_sec =
 		obs_properties_get(props, "reconnect_delay_sec");
 	obs_property_set_visible(input, !enabled);
@@ -112,7 +126,12 @@ static bool is_local_file_modified(obs_properties_t *props,
 	obs_property_set_visible(looping, enabled);
 	obs_property_set_visible(speed, enabled);
 	obs_property_set_visible(seekable, !enabled);
-	obs_property_set_visible(transition_to_next_scene_at_end, enabled);
+	obs_property_set_visible(transition_to_next_scene_at_end,
+				 enabled && !b_looping);
+	obs_property_set_visible(start_offset_s, enabled);
+	obs_property_set_visible(end_offset_s,
+				 enabled && !b_looping &&
+					 b_transition_to_next_scene_at_end);
 	obs_property_set_visible(reconnect_delay_sec, !enabled);
 
 	return true;
@@ -129,6 +148,10 @@ static void ffmpeg_source_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "speed_percent", 100);
 	obs_data_set_default_bool(settings, "transition_to_next_scene_at_end",
 				  false);
+	obs_data_set_default_double(settings, "start_offset", 0.0);
+	obs_data_set_default_double(
+		settings, "end_offset",
+		(double)DEFAULT_TRANSITION_END_TIME_MS / 1000.0); // TODO: We could read the transition duration from the global settings rather than hard coding it here
 }
 
 static const char *media_filter =
@@ -153,7 +176,7 @@ static obs_properties_t *ffmpeg_source_getproperties(void *data)
 	prop = obs_properties_add_bool(props, "is_local_file",
 				       obs_module_text("LocalFile"));
 
-	obs_property_set_modified_callback(prop, is_local_file_modified);
+	obs_property_set_modified_callback(prop, is_prop_modified);
 
 	dstr_copy(&filter, obs_module_text("MediaFileFilter.AllMediaFiles"));
 	dstr_cat(&filter, media_filter);
@@ -183,6 +206,8 @@ static obs_properties_t *ffmpeg_source_getproperties(void *data)
 	prop = obs_properties_add_bool(props, "looping",
 				       obs_module_text("Looping"));
 
+	obs_property_set_modified_callback(prop, is_prop_modified);
+
 	obs_properties_add_bool(props, "restart_on_activate",
 				obs_module_text("RestartWhenActivated"));
 
@@ -211,9 +236,16 @@ static obs_properties_t *ffmpeg_source_getproperties(void *data)
 	obs_properties_add_bool(props, "clear_on_media_end",
 				obs_module_text("ClearOnMediaEnd"));
 
-	obs_properties_add_bool(
+	prop = obs_properties_add_bool(
 		props, "transition_to_next_scene_at_end",
 		obs_module_text("TransitionToNextSceneWhenPlaybackEnds"));
+	obs_property_set_modified_callback(prop, is_prop_modified);
+
+	obs_properties_add_float(props, "start_offset",
+			       obs_module_text("StartOffset"), 0, 600, 0.01);
+
+	obs_properties_add_float(props, "end_offset",
+			       obs_module_text("EndOffset"), 0, 600, 0.01);
 
 	prop = obs_properties_add_bool(
 		props, "close_when_inactive",
@@ -312,10 +344,103 @@ static void media_stopped(void *opaque)
 	obs_source_media_ended(s->source);
 
 	if (s->transition_to_next_scene_at_end) {
-		//s->transition_status = WAIT_FOR_TRANSITION;
+		// TODO: If we come here and the source was shorter than expected should we still abort?
+		s->transition_status = INACTIVE;
 		os_event_signal(s->abort_transition_at_end);
 	}
+}
 
+static void *transition_thread(void *data)
+{
+	struct ffmpeg_source *s = data;
+	s->transition_status = WAIT_FOR_END;
+
+
+	unsigned long endTimer;
+	{
+		endTimer = (unsigned long)((s->media.fmt->duration /
+					    1000UL) -
+					   (unsigned long)(s->start_offset_ms +
+							   s->end_offset_ms)) *
+			   100UL / (unsigned long)s->speed_percent;
+
+		if (s->start_offset_ms != 0 && endTimer > 1000) {
+			// Seeking isn't accurate - it starts from the nearest keyframe
+			// If we're not starting from the beginning and the remaining duration for this media file is more one second,
+			// wait for the seek to complete, then read the actual play position and accurately calculate the end point from that
+			s->transition_status = SEEK_TO_POS;
+		}
+	}
+
+	do {
+		int state = 0;
+		os_event_reset(s->abort_transition_at_end);
+		if (s->transition_status == WAIT_FOR_END) {
+			state = os_event_timedwait(
+				s->abort_transition_at_end, endTimer);
+		}
+		if (state == ETIMEDOUT &&
+		    s->transition_status == WAIT_FOR_END) {
+			obs_source_transition_to_next_scene();
+			s->transition_status = WAIT_FOR_TRANSITION;
+		} else if (state == 0 && s->transition_status == SEEK_TO_POS) {
+			s->transition_status = WAIT_FOR_END;
+			if (s->seek_pos != 0) {
+				int64_t pos = s->seek_pos / 1000LL;
+
+				endTimer =
+					(unsigned long)((s->media.fmt->duration /
+							 1000UL) -
+							(unsigned long)(pos +
+									s->end_offset_ms)) *
+					100UL / (unsigned long)s->speed_percent;
+				s->seek_pos = 0;
+			}
+			if (endTimer > 1000) {
+				// Only wait to read the actual play position if there's more than one second left to play
+				os_event_reset(s->abort_transition_at_end);
+				state = os_event_timedwait(
+					s->abort_transition_at_end, 1000);
+				if (state == ETIMEDOUT) {
+					// The seek will have completed so calculate the new end point from current position (seeks start from the nearest keyframe to the time specified)
+					int64_t pos = s->media.v.next_pts /
+						      1000000LL;
+
+					endTimer =
+						(unsigned long)((s->media.fmt
+									 ->duration /
+								 1000UL) -
+								(unsigned long)(pos +
+										s->end_offset_ms)) *
+						100UL /
+						(unsigned long)s->speed_percent;
+				}
+			}
+		}
+	} while (s->transition_status == WAIT_FOR_END ||
+		 s->transition_status == SEEK_TO_POS);
+	return NULL;
+}
+
+static void media_started(void *opaque)
+{
+	struct ffmpeg_source *s = opaque;
+	if (s && s->transition_to_next_scene_at_end && s->media.fmt != NULL) {
+		pthread_create(&s->transition_thread, NULL, transition_thread,
+			       s);
+	}
+}
+
+static void media_seek(void *opaque, int64_t pos)
+{
+	struct ffmpeg_source *s = opaque;
+	if (s && s->transition_to_next_scene_at_end && s->media.fmt != NULL &&
+	    s->transition_status == WAIT_FOR_END) {
+		s->seek_pos = pos;
+
+		s->transition_status = SEEK_TO_POS;
+		os_event_signal(s->abort_transition_at_end);
+	}
 }
 
 static void ffmpeg_source_open(struct ffmpeg_source *s)
@@ -328,6 +453,8 @@ static void ffmpeg_source_open(struct ffmpeg_source *s)
 			.v_seek_cb = seek_frame,
 			.a_cb = get_audio,
 			.stop_cb = media_stopped,
+			.start_cb = media_started,
+			.seek_cb = media_seek,
 			.path = s->input,
 			.format = s->input_format,
 			.buffering = s->buffering_mb * 1024 * 1024,
@@ -336,6 +463,9 @@ static void ffmpeg_source_open(struct ffmpeg_source *s)
 			.hardware_decoding = s->is_hw_decoding,
 			.is_local_file = s->is_local_file || s->seekable,
 			.reconnecting = s->reconnecting,
+			.is_local_file = s->is_local_file || s->seekable,
+			.start_offset_ms = s->start_offset_ms,
+			.end_offset_ms = s->end_offset_ms,
 		};
 
 		s->media_valid = mp_media_init(&s->media, &info);
@@ -381,7 +511,7 @@ finish:
 
 static void ffmpeg_source_tick(void *data, float seconds)
 {
-	//UNUSED_PARAMETER(seconds);
+	UNUSED_PARAMETER(seconds);
 
 	struct ffmpeg_source *s = data;
 	if (s->destroy_media) {
@@ -390,51 +520,11 @@ static void ffmpeg_source_tick(void *data, float seconds)
 				os_event_signal(s->abort_transition_at_end);
 				pthread_join(s->transition_thread, NULL);
 			}
-			os_event_destroy(s->abort_transition_at_end);
 			mp_media_free(&s->media);
 			s->media_valid = false;
 		}
 
 		s->destroy_media = false;
-	}
-
-}
-
-static void *transition_thread(void *data)
-{
-	struct ffmpeg_source *s = data;
-	s->transition_status = WAIT_FOR_END;
-
-	// TODO: Get the transition duration and divide by 2 (300mS / 2 = 0.15 sec)
-	// 300mS is the default for crossfades
-	if (os_event_timedwait(s->abort_transition_at_end,
-			       (unsigned long)((s->media.fmt->duration / 1000) -
-				       150)) ==
-		    ETIMEDOUT &&
-	    s->transition_status == WAIT_FOR_END) {
-		obs_source_transition_to_next_scene();
-	}
-	s->transition_status = WAIT_FOR_TRANSITION;
-	return NULL;
-}
-
-static void ffmpeg_source_start(struct ffmpeg_source *s)
-{
-	if (!s->media_valid)
-		ffmpeg_source_open(s);
-
-	if (s->media_valid) {
-		mp_media_play(&s->media, s->is_looping);
-		if (s->is_local_file)
-			obs_source_show_preloaded_video(s->source);
-		set_media_state(s, OBS_MEDIA_STATE_PLAYING);
-		obs_source_media_started(s->source);
-		if (s->transition_to_next_scene_at_end &&
-		    s->media.fmt != NULL) {
-			os_event_reset(s->abort_transition_at_end);
-			pthread_create(&s->transition_thread, NULL,
-				       transition_thread, s);
-		}
 
 		if (!s->is_local_file) {
 			if (!os_atomic_set_bool(&s->reconnecting, true)) {
@@ -488,6 +578,12 @@ static void ffmpeg_source_update(void *data, obs_data_t *settings)
 
 	s->transition_to_next_scene_at_end =
 		obs_data_get_bool(settings, "transition_to_next_scene_at_end");
+	// The start / end times are displayed in seconds - internally we convert them to mS
+	s->start_offset_ms = (int)(obs_data_get_double(settings, "start_offset") * 1000);
+	s->end_offset_ms =
+		(int)(obs_data_get_double(settings, "end_offset") * 1000);
+	s->seek_pos = 0;
+
 
 	s->close_when_inactive =
 		obs_data_get_bool(settings, "close_when_inactive");
@@ -517,6 +613,7 @@ static void ffmpeg_source_update(void *data, obs_data_t *settings)
 	}
 
 	bool active = obs_source_active(s->source);
+
 	if (!s->close_when_inactive || active)
 		ffmpeg_source_open(s);
 
@@ -702,6 +799,9 @@ static void ffmpeg_source_destroy(void *data)
 
 	if (s->sws_ctx != NULL)
 		sws_freeContext(s->sws_ctx);
+
+	os_event_destroy(s->abort_transition_at_end);
+
 	bfree(s->sws_data);
 	bfree(s->input);
 	bfree(s->input_format);
