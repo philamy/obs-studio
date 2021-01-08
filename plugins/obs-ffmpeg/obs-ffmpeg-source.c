@@ -36,7 +36,8 @@ typedef enum {
 	INACTIVE,
 	WAIT_FOR_END,
 	WAIT_FOR_TRANSITION,
-	SEEK_TO_POS
+	RECALCULATE_END_POS,
+	PAUSED
 } transitionToNextScene_t;
 
 struct ffmpeg_source {
@@ -127,11 +128,16 @@ static bool is_prop_modified(obs_properties_t *props,
 	obs_property_set_visible(speed, enabled);
 	obs_property_set_visible(seekable, !enabled);
 	obs_property_set_visible(transition_to_next_scene_at_end,
-				 enabled && !b_looping);
+				 enabled);
+	obs_property_set_description(
+		transition_to_next_scene_at_end,
+		b_looping ? obs_module_text(
+				    "ABloop")
+			  : obs_module_text(
+				    "TransitionToNextSceneWhenPlaybackEnds"));
 	obs_property_set_visible(start_offset_s, enabled);
 	obs_property_set_visible(end_offset_s,
-				 enabled && !b_looping &&
-					 b_transition_to_next_scene_at_end);
+				 enabled && b_transition_to_next_scene_at_end);
 	obs_property_set_visible(reconnect_delay_sec, !enabled);
 
 	return true;
@@ -241,11 +247,17 @@ static obs_properties_t *ffmpeg_source_getproperties(void *data)
 		obs_module_text("TransitionToNextSceneWhenPlaybackEnds"));
 	obs_property_set_modified_callback(prop, is_prop_modified);
 
-	obs_properties_add_float(props, "start_offset",
+	prop = obs_properties_add_float(props, "start_offset",
 			       obs_module_text("StartOffset"), 0, 600, 0.01);
 
-	obs_properties_add_float(props, "end_offset",
+	obs_property_set_long_description(
+		prop, obs_module_text("StartOffset.ToolTip"));
+
+	prop = obs_properties_add_float(props, "end_offset",
 			       obs_module_text("EndOffset"), 0, 600, 0.01);
+
+	obs_property_set_long_description(
+		prop, obs_module_text("EndOffset.ToolTip"));
 
 	prop = obs_properties_add_bool(
 		props, "close_when_inactive",
@@ -368,7 +380,7 @@ static void *transition_thread(void *data)
 			// Seeking isn't accurate - it starts from the nearest keyframe
 			// If we're not starting from the beginning and the remaining duration for this media file is more one second,
 			// wait for the seek to complete, then read the actual play position and accurately calculate the end point from that
-			s->transition_status = SEEK_TO_POS;
+			s->transition_status = RECALCULATE_END_POS;
 		}
 	}
 
@@ -379,11 +391,20 @@ static void *transition_thread(void *data)
 			state = os_event_timedwait(
 				s->abort_transition_at_end, endTimer);
 		}
+		while (s->transition_status == PAUSED) {
+			state = os_event_timedwait(s->abort_transition_at_end,
+						   endTimer);
+		}
 		if (state == ETIMEDOUT &&
 		    s->transition_status == WAIT_FOR_END) {
-			obs_source_transition_to_next_scene();
-			s->transition_status = WAIT_FOR_TRANSITION;
-		} else if (state == 0 && s->transition_status == SEEK_TO_POS) {
+			if (s->is_looping) {
+				mp_media_seek_to(&s->media, s->start_offset_ms);
+			} else {
+				obs_source_transition_to_next_scene();
+				s->transition_status = WAIT_FOR_TRANSITION;
+			}
+		} else if (state == 0 &&
+			   s->transition_status == RECALCULATE_END_POS) {
 			s->transition_status = WAIT_FOR_END;
 			if (s->seek_pos != 0) {
 				int64_t pos = s->seek_pos / 1000LL;
@@ -418,7 +439,7 @@ static void *transition_thread(void *data)
 			}
 		}
 	} while (s->transition_status == WAIT_FOR_END ||
-		 s->transition_status == SEEK_TO_POS);
+		 s->transition_status == RECALCULATE_END_POS);
 	return NULL;
 }
 
@@ -438,7 +459,7 @@ static void media_seek(void *opaque, int64_t pos)
 	    s->transition_status == WAIT_FOR_END) {
 		s->seek_pos = pos;
 
-		s->transition_status = SEEK_TO_POS;
+		s->transition_status = RECALCULATE_END_POS;
 		os_event_signal(s->abort_transition_at_end);
 	}
 }
@@ -800,6 +821,11 @@ static void ffmpeg_source_destroy(void *data)
 	if (s->sws_ctx != NULL)
 		sws_freeContext(s->sws_ctx);
 
+	if (s->transition_to_next_scene_at_end) {
+		s->transition_status = INACTIVE;
+		os_event_signal(s->abort_transition_at_end);
+	}
+
 	os_event_destroy(s->abort_transition_at_end);
 
 	bfree(s->sws_data);
@@ -843,9 +869,20 @@ static void ffmpeg_source_play_pause(void *data, bool pause)
 	mp_media_play_pause(&s->media, pause);
 
 	if (pause)
+	{
 		set_media_state(s, OBS_MEDIA_STATE_PAUSED);
+		if (s->transition_to_next_scene_at_end) {
+			s->transition_status = PAUSED;
+		}
+	}
 	else
+	{
 		set_media_state(s, OBS_MEDIA_STATE_PLAYING);
+		if (s && s->transition_to_next_scene_at_end ) {
+			s->transition_status = RECALCULATE_END_POS;
+			os_event_signal(s->abort_transition_at_end);
+		}
+	}
 }
 
 static void ffmpeg_source_stop(void *data)
