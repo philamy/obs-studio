@@ -248,13 +248,13 @@ static obs_properties_t *ffmpeg_source_getproperties(void *data)
 	obs_property_set_modified_callback(prop, is_prop_modified);
 
 	prop = obs_properties_add_float(props, "start_offset",
-			       obs_module_text("StartOffset"), 0, 600, 0.01);
+			       obs_module_text("StartOffset"), 0, 3600, 0.01);
 
 	obs_property_set_long_description(
 		prop, obs_module_text("StartOffset.ToolTip"));
 
 	prop = obs_properties_add_float(props, "end_offset",
-			       obs_module_text("EndOffset"), 0, 600, 0.01);
+			       obs_module_text("EndOffset"), 0, 3600, 0.01);
 
 	obs_property_set_long_description(
 		prop, obs_module_text("EndOffset.ToolTip"));
