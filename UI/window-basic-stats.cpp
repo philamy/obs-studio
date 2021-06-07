@@ -6,12 +6,12 @@
 #include "obs-app.hpp"
 #include "qt-wrappers.hpp"
 
-#include <QDesktopWidget>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
+#include <QScreen>
 
 #include <string>
 
@@ -170,7 +170,12 @@ OBSBasicStats::OBSBasicStats(QWidget *parent, bool closeable)
 	resize(800, 280);
 
 	setWindowTitle(QTStr("Basic.Stats"));
+#ifdef __APPLE__
+	setWindowIcon(
+		QIcon::fromTheme("obs", QIcon(":/res/images/obs_256x256.png")));
+#else
 	setWindowIcon(QIcon::fromTheme("obs", QIcon(":/res/images/obs.png")));
+#endif
 
 	setWindowModality(Qt::NonModal);
 	setAttribute(Qt::WA_DeleteOnClose, true);
@@ -199,7 +204,8 @@ OBSBasicStats::OBSBasicStats(QWidget *parent, bool closeable)
 
 		QRect windowGeometry = normalGeometry();
 		if (!WindowPositionValid(windowGeometry)) {
-			QRect rect = App()->desktop()->geometry();
+			QRect rect =
+				QGuiApplication::primaryScreen()->geometry();
 			setGeometry(QStyle::alignedRect(Qt::LeftToRight,
 							Qt::AlignCenter, size(),
 							rect));

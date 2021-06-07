@@ -80,6 +80,7 @@ struct mp_media {
 	enum video_colorspace cur_space;
 	enum video_range_type cur_range;
 	enum video_range_type force_range;
+	bool is_linear_alpha;
 
 	int64_t play_sys_ts;
 	int64_t next_pts_ns;
@@ -127,6 +128,7 @@ struct mp_media_info {
 	int buffering;
 	int speed;
 	enum video_range_type force_range;
+	bool is_linear_alpha;
 	bool hardware_decoding;
 	bool is_local_file;
 	int start_offset_ms;

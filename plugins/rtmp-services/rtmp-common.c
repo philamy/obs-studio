@@ -5,10 +5,11 @@
 #include <obs-config.h>
 
 #include "rtmp-format-ver.h"
-#include "twitch.h"
-#include "younow.h"
-#include "nimotv.h"
-#include "showroom.h"
+#include "service-specific/twitch.h"
+#include "service-specific/younow.h"
+#include "service-specific/nimotv.h"
+#include "service-specific/showroom.h"
+#include "service-specific/dacast.h"
 
 struct rtmp_common {
 	char *service;
@@ -16,8 +17,8 @@ struct rtmp_common {
 	char *key;
 
 	char *output;
-	int max_cx;
-	int max_cy;
+	struct obs_service_resolution *supported_resolutions;
+	size_t supported_resolutions_count;
 	int max_fps;
 
 	bool supports_additional_audio_track;
@@ -77,8 +78,34 @@ static void update_recommendations(struct rtmp_common *service, json_t *rec)
 	if (out)
 		service->output = bstrdup(out);
 
-	service->max_cx = get_int_val(rec, "max width");
-	service->max_cy = get_int_val(rec, "max height");
+	json_t *sr = json_object_get(rec, "supported resolutions");
+	if (sr && json_is_array(sr)) {
+		DARRAY(struct obs_service_resolution) res_list;
+		json_t *res_obj;
+		size_t index;
+
+		da_init(res_list);
+
+		json_array_foreach (sr, index, res_obj) {
+			if (!json_is_string(res_obj))
+				continue;
+
+			const char *res_str = json_string_value(res_obj);
+			struct obs_service_resolution res;
+			if (sscanf(res_str, "%dx%d", &res.cx, &res.cy) != 2)
+				continue;
+			if (res.cx <= 0 || res.cy <= 0)
+				continue;
+
+			da_push_back(res_list, &res);
+		}
+
+		if (res_list.num) {
+			service->supported_resolutions = res_list.array;
+			service->supported_resolutions_count = res_list.num;
+		}
+	}
+
 	service->max_fps = get_int_val(rec, "max fps");
 }
 
@@ -90,14 +117,15 @@ static void rtmp_common_update(void *data, obs_data_t *settings)
 	bfree(service->server);
 	bfree(service->output);
 	bfree(service->key);
+	bfree(service->supported_resolutions);
 
 	service->service = bstrdup(obs_data_get_string(settings, "service"));
 	service->server = bstrdup(obs_data_get_string(settings, "server"));
 	service->key = bstrdup(obs_data_get_string(settings, "key"));
 	service->supports_additional_audio_track = false;
 	service->output = NULL;
-	service->max_cx = 0;
-	service->max_cy = 0;
+	service->supported_resolutions = NULL;
+	service->supported_resolutions_count = 0;
 	service->max_fps = 0;
 
 	json_t *root = open_services_file();
@@ -131,6 +159,7 @@ static void rtmp_common_destroy(void *data)
 {
 	struct rtmp_common *service = data;
 
+	bfree(service->supported_resolutions);
 	bfree(service->service);
 	bfree(service->server);
 	bfree(service->output);
@@ -656,6 +685,16 @@ static const char *rtmp_common_url(void *data)
 			return ingest->url;
 		}
 	}
+
+	if (service->service && strcmp(service->service, "Dacast") == 0) {
+		if (service->server && service->key) {
+			dacast_ingests_load_data(service->server, service->key);
+
+			struct dacast_ingest *ingest;
+			ingest = dacast_ingest(service->key);
+			return ingest->url;
+		}
+	}
 	return service->server;
 }
 
@@ -670,6 +709,14 @@ static const char *rtmp_common_key(void *data)
 			return ingest->key;
 		}
 	}
+
+	if (service->service && strcmp(service->service, "Dacast") == 0) {
+		if (service->key) {
+			struct dacast_ingest *ingest;
+			ingest = dacast_ingest(service->key);
+			return ingest->streamkey;
+		}
+	}
 	return service->key;
 }
 
@@ -679,15 +726,81 @@ static bool supports_multitrack(void *data)
 	return service->supports_additional_audio_track;
 }
 
-static void rtmp_common_get_max_res_fps(void *data, int *cx, int *cy, int *fps)
+static void rtmp_common_get_supported_resolutions(
+	void *data, struct obs_service_resolution **resolutions, size_t *count)
 {
 	struct rtmp_common *service = data;
-	if (cx)
-		*cx = service->max_cx;
-	if (cy)
-		*cy = service->max_cy;
-	if (fps)
-		*fps = service->max_fps;
+	*count = service->supported_resolutions_count;
+	*resolutions = bmemdup(service->supported_resolutions,
+			       *count * sizeof(struct obs_service_resolution));
+}
+
+static void rtmp_common_get_max_fps(void *data, int *fps)
+{
+	struct rtmp_common *service = data;
+	*fps = service->max_fps;
+}
+
+static void rtmp_common_get_max_bitrate(void *data, int *video_bitrate,
+					int *audio_bitrate)
+{
+	struct rtmp_common *service = data;
+	json_t *root = open_services_file();
+	json_t *item;
+
+	if (!root)
+		return;
+
+	json_t *json_service = find_service(root, service->service, NULL);
+	if (!json_service) {
+		goto fail;
+	}
+
+	json_t *recommended = json_object_get(json_service, "recommended");
+	if (!recommended) {
+		goto fail;
+	}
+
+	if (audio_bitrate) {
+		item = json_object_get(recommended, "max audio bitrate");
+		if (json_is_integer(item))
+			*audio_bitrate = (int)json_integer_value(item);
+	}
+
+	if (video_bitrate) {
+		item = json_object_get(recommended, "max video bitrate");
+		if (json_is_integer(item))
+			*video_bitrate = (int)json_integer_value(item);
+	}
+
+fail:
+	json_decref(root);
+}
+
+static const char *rtmp_common_username(void *data)
+{
+	struct rtmp_common *service = data;
+	if (service->service && strcmp(service->service, "Dacast") == 0) {
+		if (service->key) {
+			struct dacast_ingest *ingest;
+			ingest = dacast_ingest(service->key);
+			return ingest->username;
+		}
+	}
+	return NULL;
+}
+
+static const char *rtmp_common_password(void *data)
+{
+	struct rtmp_common *service = data;
+	if (service->service && strcmp(service->service, "Dacast") == 0) {
+		if (service->key) {
+			struct dacast_ingest *ingest;
+			ingest = dacast_ingest(service->key);
+			return ingest->password;
+		}
+	}
+	return NULL;
 }
 
 struct obs_service_info rtmp_common_service = {
@@ -699,7 +812,11 @@ struct obs_service_info rtmp_common_service = {
 	.get_properties = rtmp_common_properties,
 	.get_url = rtmp_common_url,
 	.get_key = rtmp_common_key,
+	.get_username = rtmp_common_username,
+	.get_password = rtmp_common_password,
 	.apply_encoder_settings = rtmp_common_apply_settings,
 	.get_output_type = rtmp_common_get_output_type,
-	.get_max_res_fps = rtmp_common_get_max_res_fps,
+	.get_supported_resolutions = rtmp_common_get_supported_resolutions,
+	.get_max_fps = rtmp_common_get_max_fps,
+	.get_max_bitrate = rtmp_common_get_max_bitrate,
 };

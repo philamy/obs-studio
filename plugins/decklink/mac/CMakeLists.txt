@@ -64,7 +64,7 @@ list(APPEND decklink_HEADERS ${decklink_UI_HEADERS})
 
 include_directories(
 	${COREFOUNDATION}
-	"${CMAKE_SOURCE_DIR}/UI/obs-frontend-api")
+)
 
 list(APPEND mac-decklink_HEADERS ${decklink_UI_HEADERS})
 
@@ -77,9 +77,8 @@ add_library(mac-decklink MODULE
 
 target_link_libraries(mac-decklink
 	libobs
-	obs-frontend-api
 	${COREFOUNDATION}
 	caption)
-set_target_properties(mac-decklink PROPERTIES FOLDER "plugins")
+set_target_properties(mac-decklink PROPERTIES FOLDER "plugins/decklink")
 
 install_obs_plugin_with_data(mac-decklink ../data)
