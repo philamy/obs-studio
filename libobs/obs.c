@@ -1873,6 +1873,276 @@ obs_source_t *obs_load_source(obs_data_t *source_data)
 	return obs_load_source_type(source_data);
 }
 
+typedef struct {
+	struct dstr oldName;
+	struct dstr newName;
+} duplicates_t;
+
+DARRAY(duplicates_t *) duplicateSources;
+
+void obs_replace_duplicate_source_names(obs_data_array_t *sources,
+					obs_data_array_t *sceneOrder,
+					obs_data_array_t *transitions)
+{
+	obs_scan_for_duplicate_source_names(sources);
+	if (duplicateSources.num) {
+		obs_replace_duplicate_scene_item_names(sources);
+		obs_replace_duplicate_scene_order_names(sceneOrder);
+	}
+	obs_release_duplicate_source_names_array();
+	obs_scan_for_duplicate_transition_names(transitions);
+	if (duplicateSources.num) {
+		obs_replace_duplicate_transition_names(transitions);
+		obs_replace_duplicate_scene_transition_override_names(sources);
+	}
+	obs_release_duplicate_source_names_array();
+}
+
+void obs_scan_for_duplicate_source_names(obs_data_array_t *sources)
+{
+	size_t sourceCount = obs_data_array_count(sources);
+
+	da_init(duplicateSources);
+	da_reserve(duplicateSources, sourceCount);
+
+	for (size_t i = 0; i < sourceCount; i++) {
+		obs_data_t *source_data = obs_data_array_item(sources, i);
+		bool exists = false;
+		const char *sourceName =
+			obs_data_get_string(source_data, "name");
+
+		obs_source_t *existingSource =
+			obs_get_source_by_name(sourceName);
+		obs_source_release(existingSource);
+
+		if (existingSource && existingSource->removed == false) {
+
+			int retry = 1;
+			struct dstr NewSourceName;
+			dstr_init(&NewSourceName);
+
+			do {
+				dstr_printf(&NewSourceName, "%s - %d",
+					    sourceName, retry);
+
+				obs_source_t *existingSource =
+					obs_get_source_by_name(
+						NewSourceName.array);
+				obs_source_release(existingSource);
+
+				if (!(existingSource &&
+				      existingSource->removed == false)) {
+					exists = false;
+					duplicates_t *duplicate =
+						malloc(sizeof(duplicates_t));
+					dstr_init_copy(&duplicate->newName,
+						       NewSourceName.array);
+					dstr_init_copy(&duplicate->oldName,
+						       sourceName);
+					da_push_back(duplicateSources,
+						     &duplicate);
+					obs_data_set_string(
+						source_data, "name",
+						NewSourceName.array);
+				}
+			} while (exists && ++retry < 50);
+			dstr_free(&NewSourceName);
+		}
+		obs_data_release(source_data);
+	}
+}
+
+void obs_scan_for_duplicate_transition_names(obs_data_array_t *transitions)
+{
+	size_t transitionCount = obs_data_array_count(transitions);
+
+	da_init(duplicateSources);
+	da_reserve(duplicateSources, transitionCount);
+
+	for (size_t i = 0; i < transitionCount; i++) {
+		obs_data_t *source_data = obs_data_array_item(transitions, i);
+		bool exists = false;
+		const char *transitionName =
+			obs_data_get_string(source_data, "name");
+
+		struct obs_context_data **first =
+			(void*)(&obs->data.first_source);
+		struct obs_context_data *context;
+
+		context = *first;
+		while (context) {
+			if (strcmp(context->name, transitionName) == 0) {
+				exists = true;
+				break;
+			}
+			context = context->next;
+		}
+
+		if (exists) {
+
+			int retry = 1;
+			struct dstr NewSourceName;
+			dstr_init(&NewSourceName);
+			exists = false;
+			do {
+				dstr_printf(&NewSourceName, "%s - %d",
+					    transitionName, retry);
+
+		                context = *first;
+				while (context) {
+					if (strcmp(context->name,
+						   NewSourceName.array) == 0) {
+						exists = true;
+						break;
+					}
+					context = context->next;
+				}
+
+				if (!exists) {
+					duplicates_t *duplicate =
+						malloc(sizeof(duplicates_t));
+					dstr_init_copy(&duplicate->newName,
+						       NewSourceName.array);
+					dstr_init_copy(&duplicate->oldName,
+						       transitionName);
+					da_push_back(duplicateSources,
+						     &duplicate);
+					obs_data_set_string(
+						source_data, "name",
+						NewSourceName.array);
+				}
+			} while (exists && ++retry < 50);
+			dstr_free(&NewSourceName);
+		}
+		obs_data_release(source_data);
+	}
+}
+
+void obs_replace_duplicate_scene_item_names(obs_data_array_t *sources)
+{
+	size_t count = obs_data_array_count(sources);
+	for (size_t i = 0; i < count; i++) {
+		obs_data_t *source_data = obs_data_array_item(sources, i);
+
+		// Update scene item names
+		const char *sourceType = obs_data_get_string(source_data, "id");
+		if (strcmp(sourceType, "scene") == 0) {
+			obs_data_t *scene_settings =
+				obs_data_get_obj(source_data, "settings");
+			obs_data_array_t *scene_items =
+				obs_data_get_array(scene_settings, "items");
+			size_t num_items = obs_data_array_count(scene_items);
+			for (size_t j = 0; j < num_items; j++) {
+				obs_data_t *scene_item =
+					obs_data_array_item(scene_items, j);
+				const char *sourceName =
+					obs_data_get_string(scene_item, "name");
+				for (size_t k = 0; k < duplicateSources.num;
+				     k++) {
+					if (dstr_cmp(
+						    &(duplicateSources.array[k]
+							      ->oldName),
+						    sourceName) == 0) {
+						obs_data_set_string(
+							scene_item, "name",
+							duplicateSources
+								.array[k]
+								->newName.array);
+					}
+				}
+				obs_data_release(scene_item);
+			}
+			obs_data_array_release(scene_items);
+			obs_data_release(scene_settings);
+		}
+		obs_data_release(source_data);
+	}
+}
+
+void obs_replace_duplicate_scene_order_names(obs_data_array_t *sceneOrder)
+{
+	size_t count = obs_data_array_count(sceneOrder);
+	for (size_t j = 0; j < count; j++) {
+		obs_data_t *data = obs_data_array_item(sceneOrder, j);
+		const char *name = obs_data_get_string(data, "name");
+		for (size_t i = 0; i < duplicateSources.num; i++) {
+			if (dstr_cmp(&(duplicateSources.array[i]->oldName),
+				     name) == 0) {
+				obs_data_set_string(data, "name",
+						    duplicateSources.array[i]
+							    ->newName.array);
+			}
+		}
+	}
+}
+
+void obs_replace_duplicate_transition_names(obs_data_array_t *transitions)
+{
+	size_t count = obs_data_array_count(transitions);
+	for (size_t j = 0; j < count; j++) {
+		obs_data_t *data = obs_data_array_item(transitions, j);
+		const char *name = obs_data_get_string(data, "name");
+		for (size_t i = 0; i < duplicateSources.num; i++) {
+			if (dstr_cmp(&(duplicateSources.array[i]->oldName),
+				     name) == 0) {
+				obs_data_set_string(data, "name",
+						    duplicateSources.array[i]
+							    ->newName.array);
+			}
+		}
+	}
+}
+
+void obs_replace_duplicate_scene_transition_override_names(
+	obs_data_array_t *sources)
+{
+	size_t count = obs_data_array_count(sources);
+	for (size_t i = 0; i < count; i++) {
+		obs_data_t *source_data = obs_data_array_item(sources, i);
+		const char *sourceType = obs_data_get_string(source_data, "id");
+		if (strcmp(sourceType, "scene") == 0) {
+			obs_data_t *private_settings = obs_data_get_obj(
+				source_data, "private_settings");
+			if (private_settings) {
+				const char *transitionName =
+					obs_data_get_string(private_settings,
+							    "transition");
+				if (*transitionName != '\0') {
+					for (size_t k = 0;k < duplicateSources.num;k++) {
+						if (dstr_cmp(
+							    &(duplicateSources
+								      .array[k]
+								      ->oldName),
+							    transitionName) ==
+						    0) {
+							obs_data_set_string(
+								private_settings,
+								"transition",
+								duplicateSources
+									.array[k]
+									->newName
+									.array);
+							break;
+						}
+					}
+				}
+			}
+			obs_data_release(private_settings);
+		}
+		obs_data_release(source_data);
+	}
+}
+
+void obs_release_duplicate_source_names_array()
+{
+	for (size_t i = 0; i < duplicateSources.num; i++) {
+		dstr_free(&(duplicateSources.array[i])->newName);
+		dstr_free(&(duplicateSources.array[i])->oldName);
+		free(duplicateSources.array[i]);
+	}
+	da_free(duplicateSources);
+}
+
 void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 		      void *private_data)
 {
@@ -1890,10 +2160,53 @@ void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 
 	for (i = 0; i < count; i++) {
 		obs_data_t *source_data = obs_data_array_item(array, i);
-		obs_source_t *source = obs_load_source(source_data);
 
-		da_push_back(sources, &source);
+		// Don't add a source with a duplicate name (to avoid conflicts)
+		bool exists = false;
+		const char* sourceName = obs_data_get_string(source_data, "name");
 
+		obs_source_t *existingSource =
+		obs_get_source_by_name(sourceName);
+		obs_source_release(existingSource);
+
+		if (existingSource && existingSource->removed == false) {
+			exists = true;
+		}
+
+		if (exists) {
+			int retry = 1;
+			struct dstr NewSourceName;
+			dstr_init(&NewSourceName);
+			
+			do {
+				dstr_printf(&NewSourceName, "%s - %d",
+					    sourceName, retry);
+
+				obs_source_t *existingSource =
+					obs_get_source_by_name(NewSourceName.array);
+				obs_source_release(existingSource);
+
+				if (!(existingSource &&
+				    existingSource->removed == false))
+				{
+					exists = false;
+					duplicates_t *duplicate = malloc(sizeof(duplicates_t));
+					dstr_init_copy(&duplicate->newName,
+						       NewSourceName.array);
+					dstr_init_copy(&duplicate->oldName,
+						       sourceName);
+					da_push_back(duplicateSources,
+						     &duplicate);
+					obs_data_set_string(source_data, "name",
+						NewSourceName.array);
+				}
+			} while (exists && ++retry < 50);
+			dstr_free(&NewSourceName);
+		}
+		if (!exists) {
+			obs_source_t *source = obs_load_source(source_data);
+			da_push_back(sources, &source);
+		}
 		obs_data_release(source_data);
 	}
 
@@ -1902,6 +2215,33 @@ void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 		obs_source_t *source = sources.array[i];
 		obs_data_t *source_data = obs_data_array_item(array, i);
 		if (source) {
+			//if (source->info.type == OBS_SOURCE_TYPE_SCENE) {
+
+				struct obs_context_data *item =
+					source->context.next;
+
+				do {
+					// Check if any sources within this scene need to be renamed
+					for (size_t j = 0;
+					     j < duplicateSources.num; j++) {
+						if (dstr_cmp(
+							    &(duplicateSources
+								      .array[j]
+								      ->oldName),
+							    item->name) == 0) {
+							/*
+							bfree(item->name);
+							item->name = bstrdup(
+								duplicateSources
+									.array[j]
+									->newName
+									.array);*/
+						}
+					}
+					item = item->next;
+				} while (item != NULL);
+			//}
+
 			if (source->info.type == OBS_SOURCE_TYPE_TRANSITION)
 				obs_transition_load(source, source_data);
 			obs_source_load(source);
@@ -1910,8 +2250,9 @@ void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 					source->filters.array[i - 1];
 				obs_source_load(filter);
 			}
-			if (cb)
+			if (cb) {
 				cb(private_data, source);
+			}
 		}
 		obs_data_release(source_data);
 	}
@@ -1922,6 +2263,7 @@ void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 	pthread_mutex_unlock(&data->sources_mutex);
 
 	da_free(sources);
+
 }
 
 obs_data_t *obs_save_source(obs_source_t *source)

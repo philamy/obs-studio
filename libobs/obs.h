@@ -697,6 +697,25 @@ EXPORT void obs_source_load(obs_source_t *source);
 
 typedef void (*obs_load_source_cb)(void *private_data, obs_source_t *source);
 
+EXPORT void obs_replace_duplicate_source_names(obs_data_array_t *sources,
+					       obs_data_array_t *sceneOrder,
+					       obs_data_array_t *transitions);
+
+EXPORT void obs_scan_for_duplicate_source_names(obs_data_array_t *sources);
+
+EXPORT void obs_scan_for_duplicate_transition_names(obs_data_array_t *transitions);
+
+EXPORT void obs_replace_duplicate_scene_item_names(obs_data_array_t *sources);
+
+EXPORT void obs_replace_duplicate_scene_transition_override_names(
+	obs_data_array_t *sources);
+
+EXPORT void obs_replace_duplicate_scene_order_names(obs_data_array_t *array);
+
+EXPORT void obs_replace_duplicate_transition_names(obs_data_array_t *transitions);
+
+EXPORT void obs_release_duplicate_source_names_array();
+
 /** Loads sources from a data array */
 EXPORT void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 			     void *private_data);

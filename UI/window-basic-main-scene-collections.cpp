@@ -271,6 +271,21 @@ void OBSBasic::on_actionDupSceneCollection_triggered()
 	AddSceneCollection(false);
 }
 
+void OBSBasic::on_actionMergeSceneCollection_triggered()
+{
+	QString home = QDir::homePath();
+
+	QString currentFile = QT_UTF8(config_get_string(
+		App()->GlobalConfig(), "Basic", "SceneCollectionFile"));
+
+	QString mergeFile =
+		OpenFile(this, QTStr("Basic.MainMenu.SceneCollection.Merge"),
+			 home, "JSON Files (*.json)");
+
+	Load(QT_TO_UTF8(mergeFile),true);
+}
+
+
 void OBSBasic::on_actionRenameSceneCollection_triggered()
 {
 	std::string name;

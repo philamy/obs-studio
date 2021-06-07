@@ -589,6 +589,7 @@
     </property>
     <addaction name="actionNewSceneCollection"/>
     <addaction name="actionDupSceneCollection"/>
+    <addaction name="actionMergeSceneCollection"/>
     <addaction name="actionRenameSceneCollection"/>
     <addaction name="actionRemoveSceneCollection"/>
     <addaction name="actionImportSceneCollection"/>
@@ -1725,6 +1726,11 @@
    <property name="text">
     <string>Duplicate</string>
    </property>
+  </action>
+  <action name="actionMergeSceneCollection">
+     <property name="text">
+        <string>Merge</string>
+     </property>
   </action>
   <action name="actionRenameSceneCollection">
    <property name="text">

@@ -308,7 +308,7 @@ private:
 	void UploadLog(const char *subdir, const char *file, const bool crash);
 
 	void Save(const char *file);
-	void Load(const char *file);
+	void Load(const char *file, bool bMerge = false);
 
 	void InitHotkeys();
 	void CreateHotkeys();
@@ -929,6 +929,7 @@ private slots:
 
 	void on_actionNewSceneCollection_triggered();
 	void on_actionDupSceneCollection_triggered();
+	void on_actionMergeSceneCollection_triggered();
 	void on_actionRenameSceneCollection_triggered();
 	void on_actionRemoveSceneCollection_triggered();
 	void on_actionImportSceneCollection_triggered();

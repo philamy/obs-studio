@@ -892,7 +892,7 @@ void OBSBasic::LogScenes()
 	blog(LOG_INFO, "------------------------------------------------");
 }
 
-void OBSBasic::Load(const char *file)
+void OBSBasic::Load(const char *file, bool bMerge)
 {
 	disableSaving++;
 
@@ -905,8 +905,12 @@ void OBSBasic::Load(const char *file)
 		return;
 	}
 
-	ClearSceneData();
-	InitDefaultTransitions();
+	if (bMerge) {
+		ClearQuickTransitions();
+	} else {
+		ClearSceneData();
+		InitDefaultTransitions();
+	}
 	ClearContextBar();
 
 	if (devicePropertiesThread && devicePropertiesThread->isRunning()) {
@@ -970,12 +974,19 @@ void OBSBasic::Load(const char *file)
 		obs_data_array_push_back_array(sources, groups);
 	}
 
+	if (bMerge) {
+		obs_replace_duplicate_source_names(sources, sceneOrder,
+						   transitions);
+	}
+
 	obs_load_sources(sources, nullptr, nullptr);
 
 	if (transitions)
-		LoadTransitions(transitions);
-	if (sceneOrder)
+		LoadTransitions(
+			transitions); // TODO: For merges handle duplicate transition names
+	if (sceneOrder) {
 		LoadSceneListOrder(sceneOrder);
+	}
 
 	obs_data_array_release(transitions);
 
@@ -987,31 +998,34 @@ void OBSBasic::Load(const char *file)
 	SetTransition(curTransition);
 
 retryScene:
-	curScene = obs_get_source_by_name(sceneName);
-	curProgramScene = obs_get_source_by_name(programSceneName);
+	if (bMerge == false) {
+		curScene = obs_get_source_by_name(sceneName);
+		curProgramScene = obs_get_source_by_name(programSceneName);
 
-	/* if the starting scene command line parameter is bad at all,
+		/* if the starting scene command line parameter is bad at all,
 	 * fall back to original settings */
-	if (!opt_starting_scene.empty() && (!curScene || !curProgramScene)) {
-		sceneName = obs_data_get_string(data, "current_scene");
-		programSceneName =
-			obs_data_get_string(data, "current_program_scene");
+		if (!opt_starting_scene.empty() &&
+		    (!curScene || !curProgramScene)) {
+			sceneName = obs_data_get_string(data, "current_scene");
+			programSceneName = obs_data_get_string(
+				data, "current_program_scene");
+			obs_source_release(curScene);
+			obs_source_release(curProgramScene);
+			opt_starting_scene.clear();
+			goto retryScene;
+		}
+
+		if (!curProgramScene) {
+			curProgramScene = curScene;
+			obs_source_addref(curScene);
+		}
+
+		SetCurrentScene(curScene, true);
+		if (IsPreviewProgramMode())
+			TransitionToScene(curProgramScene, true);
 		obs_source_release(curScene);
 		obs_source_release(curProgramScene);
-		opt_starting_scene.clear();
-		goto retryScene;
 	}
-
-	if (!curProgramScene) {
-		curProgramScene = curScene;
-		obs_source_addref(curScene);
-	}
-
-	SetCurrentScene(curScene, true);
-	if (IsPreviewProgramMode())
-		TransitionToScene(curProgramScene, true);
-	obs_source_release(curScene);
-	obs_source_release(curProgramScene);
 
 	obs_data_array_release(sources);
 	obs_data_array_release(groups);
@@ -1040,10 +1054,12 @@ retryScene:
 	std::string file_base = strrchr(file, '/') + 1;
 	file_base.erase(file_base.size() - 5, 5);
 
-	config_set_string(App()->GlobalConfig(), "Basic", "SceneCollection",
-			  name);
-	config_set_string(App()->GlobalConfig(), "Basic", "SceneCollectionFile",
-			  file_base.c_str());
+	if (bMerge == false) {
+		config_set_string(App()->GlobalConfig(), "Basic",
+				  "SceneCollection", name);
+		config_set_string(App()->GlobalConfig(), "Basic",
+				  "SceneCollectionFile", file_base.c_str());
+	}
 
 	obs_data_array_t *quickTransitionData =
 		obs_data_get_array(data, "quick_transitions");
@@ -3716,7 +3732,7 @@ void OBSBasic::TransitionToNextScene(void *data, calldata_t *params)
 			if (currentScene == scenes.sources.array[i] &&
 			    (i + 1) < scenes.sources.num) {
 				obs_frontend_set_current_scene(
-					scenes.sources.array[i+1]);
+					scenes.sources.array[i + 1]);
 			}
 		}
 		obs_frontend_source_list_free(&scenes);
