@@ -4171,8 +4171,8 @@ void OBSBasic::ClearSceneData()
 	CloseDialogs();
 
 	ClearVolumeControls();
-	ClearListItems(ui->scenes);
 	ui->sources->Clear();
+	ClearListItems(ui->scenes);
 	ClearQuickTransitions();
 	ui->transitions->clear();
 
