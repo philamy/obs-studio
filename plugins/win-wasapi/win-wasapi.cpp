@@ -91,6 +91,9 @@ public:
 	inline ~WASAPISource();
 
 	void Update(obs_data_t *settings);
+	void StoreCurrentSyncOffset();
+	obs_properties_t *GetWASAPIProperties(bool input);
+	bool SyncOffsetPropertyModifiedCallback(obs_data_t *settings);
 
 	void SetDefaultDevice(EDataFlow flow, ERole role, LPCWSTR id);
 };
@@ -144,9 +147,6 @@ public:
 	{
 		return S_OK;
 	}
-	void StoreCurrentSyncOffset();
-	obs_properties_t *GetWASAPIProperties(bool input);
-	bool SyncOffsetPropertyModifiedCallback(obs_data_t *settings);
 };
 
 WASAPISource::WASAPISource(obs_data_t *settings_, obs_source_t *source_,
@@ -154,8 +154,7 @@ WASAPISource::WASAPISource(obs_data_t *settings_, obs_source_t *source_,
 	: source(source_),
 	  isInputDevice(input),
 	  currentSyncOffset_nS(0),
-	  settings(settings_)/*,
-	  lock(false)*/
+	  settings(settings_)
 {
 	obs_data_set_int(settings, OPT_CURRENT_SYNC_OFFSET, currentSyncOffset_nS);
 

@@ -2166,7 +2166,7 @@ void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 		const char* sourceName = obs_data_get_string(source_data, "name");
 
 		obs_source_t *existingSource =
-		obs_get_source_by_name(sourceName);
+			obs_get_source_by_name(sourceName);
 		obs_source_release(existingSource);
 
 		if (existingSource && existingSource->removed == false) {
@@ -2177,7 +2177,7 @@ void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 			int retry = 1;
 			struct dstr NewSourceName;
 			dstr_init(&NewSourceName);
-			
+
 			do {
 				dstr_printf(&NewSourceName, "%s - %d",
 					    sourceName, retry);
@@ -2187,7 +2187,7 @@ void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 				obs_source_release(existingSource);
 
 				if (!(existingSource &&
-				    existingSource->removed == false))
+				      existingSource->removed == false))
 				{
 					exists = false;
 					duplicates_t *duplicate = malloc(sizeof(duplicates_t));
@@ -2215,40 +2215,29 @@ void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 		obs_source_t *source = sources.array[i];
 		obs_data_t *source_data = obs_data_array_item(array, i);
 		if (source) {
-			//if (source->info.type == OBS_SOURCE_TYPE_SCENE) {
+			struct obs_context_data *item = source->context.next;
 
-				struct obs_context_data *item =
-					source->context.next;
-
-				do {
-					// Check if any sources within this scene need to be renamed
-					for (size_t j = 0;
-					     j < duplicateSources.num; j++) {
-						if (dstr_cmp(
-							    &(duplicateSources
-								      .array[j]
-								      ->oldName),
-							    item->name) == 0) {
-							/*
-							bfree(item->name);
-							item->name = bstrdup(
-								duplicateSources
-									.array[j]
-									->newName
-									.array);*/
-						}
+			do {
+				// Check if any sources within this scene need to be renamed
+				for (size_t j = 0; j < duplicateSources.num;
+				     j++) {
+					if (dstr_cmp(
+						    &(duplicateSources.array[j]
+							      ->oldName),
+						    item->name) == 0) {
 					}
-					item = item->next;
-				} while (item != NULL);
-			//}
+				}
+				item = item->next;
+			} while (item != NULL);
+
 
 			if (source->info.type == OBS_SOURCE_TYPE_TRANSITION)
 				obs_transition_load(source, source_data);
 			obs_source_load2(source);
 			if (cb)
 				cb(private_data, source);
-			}
 		}
+
 		obs_data_release(source_data);
 	}
 

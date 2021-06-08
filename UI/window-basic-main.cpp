@@ -1014,7 +1014,12 @@ void OBSBasic::LoadData(obs_data_t* data, const char* file, bool bMerge)
 		obs_data_array_push_back_array(sources, groups);
 	}
 
-	obs_load_sources(sources, nullptr, nullptr);
+	if (bMerge) {
+		obs_replace_duplicate_source_names(sources, sceneOrder,
+						   transitions);
+	}
+
+	obs_missing_files_t *files = obs_missing_files_create();
 
 	auto cb = [](void *private_data, obs_source_t *source) {
 		obs_missing_files_t *f = (obs_missing_files_t *)private_data;
