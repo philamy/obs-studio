@@ -1966,7 +1966,7 @@ void obs_scan_for_duplicate_transition_names(obs_data_array_t *transitions)
 			obs_data_get_string(source_data, "name");
 
 		struct obs_context_data **first =
-			(void*)(&obs->data.first_source);
+			(void *)(&obs->data.first_source);
 		struct obs_context_data *context;
 
 		context = *first;
@@ -1988,7 +1988,7 @@ void obs_scan_for_duplicate_transition_names(obs_data_array_t *transitions)
 				dstr_printf(&NewSourceName, "%s - %d",
 					    transitionName, retry);
 
-		                context = *first;
+				context = *first;
 				while (context) {
 					if (strcmp(context->name,
 						   NewSourceName.array) == 0) {
@@ -2108,7 +2108,8 @@ void obs_replace_duplicate_scene_transition_override_names(
 					obs_data_get_string(private_settings,
 							    "transition");
 				if (*transitionName != '\0') {
-					for (size_t k = 0;k < duplicateSources.num;k++) {
+					for (size_t k = 0;
+					     k < duplicateSources.num; k++) {
 						if (dstr_cmp(
 							    &(duplicateSources
 								      .array[k]
@@ -2163,7 +2164,8 @@ void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 
 		// Don't add a source with a duplicate name (to avoid conflicts)
 		bool exists = false;
-		const char* sourceName = obs_data_get_string(source_data, "name");
+		const char *sourceName =
+			obs_data_get_string(source_data, "name");
 
 		obs_source_t *existingSource =
 			obs_get_source_by_name(sourceName);
@@ -2183,21 +2185,23 @@ void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 					    sourceName, retry);
 
 				obs_source_t *existingSource =
-					obs_get_source_by_name(NewSourceName.array);
+					obs_get_source_by_name(
+						NewSourceName.array);
 				obs_source_release(existingSource);
 
 				if (!(existingSource &&
-				      existingSource->removed == false))
-				{
+				      existingSource->removed == false)) {
 					exists = false;
-					duplicates_t *duplicate = malloc(sizeof(duplicates_t));
+					duplicates_t *duplicate =
+						malloc(sizeof(duplicates_t));
 					dstr_init_copy(&duplicate->newName,
 						       NewSourceName.array);
 					dstr_init_copy(&duplicate->oldName,
 						       sourceName);
 					da_push_back(duplicateSources,
 						     &duplicate);
-					obs_data_set_string(source_data, "name",
+					obs_data_set_string(
+						source_data, "name",
 						NewSourceName.array);
 				}
 			} while (exists && ++retry < 50);
@@ -2230,7 +2234,6 @@ void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 				item = item->next;
 			} while (item != NULL);
 
-
 			if (source->info.type == OBS_SOURCE_TYPE_TRANSITION)
 				obs_transition_load(source, source_data);
 			obs_source_load2(source);
@@ -2247,7 +2250,6 @@ void obs_load_sources(obs_data_array_t *array, obs_load_source_cb cb,
 	pthread_mutex_unlock(&data->sources_mutex);
 
 	da_free(sources);
-
 }
 
 obs_data_t *obs_save_source(obs_source_t *source)

@@ -257,9 +257,8 @@ void OBSBasic::on_actionMergeSceneCollection_triggered()
 		OpenFile(this, QTStr("Basic.MainMenu.SceneCollection.Merge"),
 			 home, "JSON Files (*.json)");
 
-	Load(QT_TO_UTF8(mergeFile),true);
+	Load(QT_TO_UTF8(mergeFile), true);
 }
-
 
 void OBSBasic::on_actionRenameSceneCollection_triggered()
 {

@@ -942,12 +942,11 @@ void OBSBasic::Load(const char *file, bool bMerge)
 	LoadData(data, file, bMerge);
 }
 
-void OBSBasic::LoadData(obs_data_t* data, const char* file, bool bMerge)
+void OBSBasic::LoadData(obs_data_t *data, const char *file, bool bMerge)
 {
 	if (bMerge) {
 		ClearQuickTransitions();
-	}
-	else {
+	} else {
 		ClearSceneData();
 		InitDefaultTransitions();
 	}

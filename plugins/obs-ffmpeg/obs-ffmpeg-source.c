@@ -94,8 +94,7 @@ static void set_media_state(void *data, enum obs_media_state state)
 	s->state = state;
 }
 
-static bool is_prop_modified(obs_properties_t *props,
-				   obs_property_t *prop,
+static bool is_prop_modified(obs_properties_t *props, obs_property_t *prop,
 			     obs_data_t *settings)
 {
 	UNUSED_PARAMETER(prop);
@@ -128,12 +127,10 @@ static bool is_prop_modified(obs_properties_t *props,
 	obs_property_set_visible(looping, enabled);
 	obs_property_set_visible(speed, enabled);
 	obs_property_set_visible(seekable, !enabled);
-	obs_property_set_visible(transition_to_next_scene_at_end,
-				 enabled);
+	obs_property_set_visible(transition_to_next_scene_at_end, enabled);
 	obs_property_set_description(
 		transition_to_next_scene_at_end,
-		b_looping ? obs_module_text(
-				    "ABloop")
+		b_looping ? obs_module_text("ABloop")
 			  : obs_module_text(
 				    "TransitionToNextSceneWhenPlaybackEnds"));
 	obs_property_set_visible(start_offset_s, enabled);
@@ -159,7 +156,8 @@ static void ffmpeg_source_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, "start_offset", 0.0);
 	obs_data_set_default_double(
 		settings, "end_offset",
-		(double)DEFAULT_TRANSITION_END_TIME_MS / 1000.0); // TODO: We could read the transition duration from the global settings rather than hard coding it here
+		(double)DEFAULT_TRANSITION_END_TIME_MS /
+			1000.0); // TODO: We could read the transition duration from the global settings rather than hard coding it here
 }
 
 static const char *media_filter =
@@ -247,16 +245,18 @@ static obs_properties_t *ffmpeg_source_getproperties(void *data)
 	obs_property_set_modified_callback(prop, is_prop_modified);
 
 	prop = obs_properties_add_float(props, "start_offset",
-			       obs_module_text("StartOffset"), 0, 3600, 0.01);
+					obs_module_text("StartOffset"), 0, 3600,
+					0.01);
 
 	obs_property_set_long_description(
 		prop, obs_module_text("StartOffset.ToolTip"));
 
 	prop = obs_properties_add_float(props, "end_offset",
-			       obs_module_text("EndOffset"), 0, 3600, 0.01);
+					obs_module_text("EndOffset"), 0, 3600,
+					0.01);
 
-	obs_property_set_long_description(
-		prop, obs_module_text("EndOffset.ToolTip"));
+	obs_property_set_long_description(prop,
+					  obs_module_text("EndOffset.ToolTip"));
 
 	prop = obs_properties_add_bool(
 		props, "close_when_inactive",
@@ -371,11 +371,9 @@ static void *transition_thread(void *data)
 	struct ffmpeg_source *s = data;
 	s->transition_status = WAIT_FOR_END;
 
-
 	unsigned long endTimer;
 	{
-		endTimer = (unsigned long)((s->media.fmt->duration /
-					    1000UL) -
+		endTimer = (unsigned long)((s->media.fmt->duration / 1000UL) -
 					   (unsigned long)(s->start_offset_ms +
 							   s->end_offset_ms)) *
 			   100UL / (unsigned long)s->speed_percent;
@@ -392,8 +390,8 @@ static void *transition_thread(void *data)
 		int state = 0;
 		os_event_reset(s->abort_transition_at_end);
 		if (s->transition_status == WAIT_FOR_END) {
-			state = os_event_timedwait(
-				s->abort_transition_at_end, endTimer);
+			state = os_event_timedwait(s->abort_transition_at_end,
+						   endTimer);
 		}
 		while (s->transition_status == PAUSED) {
 			state = os_event_timedwait(s->abort_transition_at_end,
@@ -428,8 +426,8 @@ static void *transition_thread(void *data)
 					s->abort_transition_at_end, 1000);
 				if (state == ETIMEDOUT) {
 					// The seek will have completed so calculate the new end point from current position (seeks start from the nearest keyframe to the time specified)
-					int64_t pos = s->media.v.next_pts /
-						      1000000LL;
+					int64_t pos =
+						s->media.v.next_pts / 1000000LL;
 
 					endTimer =
 						(unsigned long)((s->media.fmt
@@ -605,11 +603,11 @@ static void ffmpeg_source_update(void *data, obs_data_t *settings)
 	s->transition_to_next_scene_at_end =
 		obs_data_get_bool(settings, "transition_to_next_scene_at_end");
 	// The start / end times are displayed in seconds - internally we convert them to mS
-	s->start_offset_ms = (int)(obs_data_get_double(settings, "start_offset") * 1000);
+	s->start_offset_ms =
+		(int)(obs_data_get_double(settings, "start_offset") * 1000);
 	s->end_offset_ms =
 		(int)(obs_data_get_double(settings, "end_offset") * 1000);
 	s->seek_pos = 0;
-
 
 	s->close_when_inactive =
 		obs_data_get_bool(settings, "close_when_inactive");
@@ -877,8 +875,7 @@ static void ffmpeg_source_play_pause(void *data, bool pause)
 		if (s->transition_to_next_scene_at_end) {
 			s->transition_status = PAUSED;
 		}
-	}
-	else {
+	} else {
 		set_media_state(s, OBS_MEDIA_STATE_PLAYING);
 		if (s && s->transition_to_next_scene_at_end) {
 			s->transition_status = RECALCULATE_END_POS;

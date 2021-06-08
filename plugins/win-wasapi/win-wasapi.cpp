@@ -46,7 +46,8 @@ class WASAPISource {
 	bool isInputDevice;
 	bool useDeviceTiming = false;
 	bool isDefaultDevice = false;
-	__int64 syncOffsetDrift_mS_perHour = 0; // in mS per hour (positive or negative)
+	__int64 syncOffsetDrift_mS_perHour =
+		0; // in mS per hour (positive or negative)
 	__int64 tickCountdownTillNextSyncCorrection;
 	__int64 tickCountFor_1mS_syncCorrection; // The tick interval is 10mS
 	__int64 currentSyncOffset_nS = 0;
@@ -156,7 +157,8 @@ WASAPISource::WASAPISource(obs_data_t *settings_, obs_source_t *source_,
 	  currentSyncOffset_nS(0),
 	  settings(settings_)
 {
-	obs_data_set_int(settings, OPT_CURRENT_SYNC_OFFSET, currentSyncOffset_nS);
+	obs_data_set_int(settings, OPT_CURRENT_SYNC_OFFSET,
+			 currentSyncOffset_nS);
 
 	UpdateSettings(settings);
 
@@ -208,7 +210,8 @@ void WASAPISource::UpdateSettings(obs_data_t *_settings)
 {
 	device_id = obs_data_get_string(_settings, OPT_DEVICE_ID);
 	useDeviceTiming = obs_data_get_bool(_settings, OPT_USE_DEVICE_TIMING);
-	syncOffsetDrift_mS_perHour = obs_data_get_int(_settings, OPT_SYNC_OFFSET_DRIFT);
+	syncOffsetDrift_mS_perHour =
+		obs_data_get_int(_settings, OPT_SYNC_OFFSET_DRIFT);
 	// We read currentSyncOffset_nS / OPT_CURRENT_SYNC_OFFSET via the SyncOffsetPropertyModifiedCallback
 	// it behaves differently to other properties (allowing this class to change its value)
 	// It's not set here to prevent an old value being restored when 'Cancel' is pressed on the 'Properties' dialog
@@ -225,7 +228,8 @@ void WASAPISource::UpdateSettings(obs_data_t *_settings)
 		if (tickCountFor_1mS_syncCorrection < 0) {
 			tickCountFor_1mS_syncCorrection *= -1;
 		}
-		tickCountdownTillNextSyncCorrection = tickCountFor_1mS_syncCorrection;
+		tickCountdownTillNextSyncCorrection =
+			tickCountFor_1mS_syncCorrection;
 	}
 
 	isDefaultDevice = _strcmpi(device_id.c_str(), "default") == 0;
@@ -583,17 +587,22 @@ bool WASAPISource::ProcessCaptureData()
 			data.timestamp += currentSyncOffset_nS;
 			if (tickCountdownTillNextSyncCorrection == 0) {
 				if (syncOffsetDrift_mS_perHour > 0) {
-					currentSyncOffset_nS  += 1000000; // increment by 1mS
+					currentSyncOffset_nS +=
+						1000000; // increment by 1mS
+				} else {
+					currentSyncOffset_nS -=
+						1000000; // decrement by 1mS
 				}
-				else {
-					currentSyncOffset_nS -= 1000000; // decrement by 1mS
-				}
-				tickCountdownTillNextSyncCorrection = tickCountFor_1mS_syncCorrection;
+				tickCountdownTillNextSyncCorrection =
+					tickCountFor_1mS_syncCorrection;
 				// The timestamps are in nS
 				// This function is called every 10mS
 #ifdef DEBUG_SYNC_OFFSET
 				wchar_t name[64];
-				swprintf(name, 64, L"Increment current Sync Offset: %llimS\n", currentSyncOffset_nS / 1000000);
+				swprintf(
+					name, 64,
+					L"Increment current Sync Offset: %llimS\n",
+					currentSyncOffset_nS / 1000000);
 				//swprintf(name, 64, L"%llu\n", data.timestamp);
 				OutputDebugString(name);
 #endif
@@ -650,7 +659,8 @@ DWORD WINAPI WASAPISource::CaptureThread(LPVOID param)
 	return 0;
 }
 
-void WASAPISource::StoreCurrentSyncOffset() {
+void WASAPISource::StoreCurrentSyncOffset()
+{
 	if (this != NULL) {
 		// Used to display the current sync offset on the properties window
 		obs_data_set_int(settings, OPT_CURRENT_SYNC_OFFSET,
@@ -693,7 +703,8 @@ void WASAPISource::SetDefaultDevice(EDataFlow flow, ERole role, LPCWSTR id)
 	lastNotifyTime = t;
 }
 
-bool WASAPISource::SyncOffsetPropertyModifiedCallback(obs_data_t* settings) {
+bool WASAPISource::SyncOffsetPropertyModifiedCallback(obs_data_t *settings)
+{
 	if (this != NULL) {
 		// Update the current sync offset from the properties window
 		currentSyncOffset_nS =
@@ -769,12 +780,12 @@ static void UpdateWASAPISource(void *obj, obs_data_t *settings)
 }
 
 static bool sync_offset_property_modified_callback(void *obj,
-					  obs_properties_t *, // props
-					 obs_property_t *, // prop
-					  obs_data_t *settings)
+						   obs_properties_t *, // props
+						   obs_property_t *,   // prop
+						   obs_data_t *settings)
 {
-	return static_cast<WASAPISource *>(obj)->SyncOffsetPropertyModifiedCallback(
-		settings);
+	return static_cast<WASAPISource *>(obj)
+		->SyncOffsetPropertyModifiedCallback(settings);
 }
 
 obs_properties_t *WASAPISource::GetWASAPIProperties(bool input)

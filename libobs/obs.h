@@ -719,7 +719,8 @@ EXPORT void obs_replace_duplicate_source_names(obs_data_array_t *sources,
 
 EXPORT void obs_scan_for_duplicate_source_names(obs_data_array_t *sources);
 
-EXPORT void obs_scan_for_duplicate_transition_names(obs_data_array_t *transitions);
+EXPORT void
+obs_scan_for_duplicate_transition_names(obs_data_array_t *transitions);
 
 EXPORT void obs_replace_duplicate_scene_item_names(obs_data_array_t *sources);
 
@@ -728,7 +729,8 @@ EXPORT void obs_replace_duplicate_scene_transition_override_names(
 
 EXPORT void obs_replace_duplicate_scene_order_names(obs_data_array_t *array);
 
-EXPORT void obs_replace_duplicate_transition_names(obs_data_array_t *transitions);
+EXPORT void
+obs_replace_duplicate_transition_names(obs_data_array_t *transitions);
 
 EXPORT void obs_release_duplicate_source_names_array();
 
