@@ -3696,15 +3696,38 @@ void OBSBasic::DuplicateSelectedScene()
 	}
 }
 
-static void save_undo_source_enum(obs_source_t *, obs_source_t *source, void *p)
+static bool save_undo_source_enum(obs_scene_t *scene, obs_sceneitem_t *item,
+				  void *p)
 {
+	UNUSED_PARAMETER(scene);
+
+	obs_source_t *source = obs_sceneitem_get_source(item);
 	if (obs_obj_is_private(source) && !obs_source_removed(source))
-		return;
+		return true;
 
 	obs_data_array_t *array = (obs_data_array_t *)p;
+
+	/* check if the source is already stored in the array */
+	const char *name = obs_source_get_name(source);
+	const size_t count = obs_data_array_count(array);
+	for (size_t i = 0; i < count; i++) {
+		obs_data_t *sourceData = obs_data_array_item(array, i);
+		if (strcmp(name, obs_data_get_string(sourceData, "name")) ==
+		    0) {
+			obs_data_release(sourceData);
+			return true;
+		}
+		obs_data_release(sourceData);
+	}
+
+	if (obs_source_is_group(source))
+		obs_scene_enum_items(obs_group_from_source(source),
+				     save_undo_source_enum, p);
+
 	obs_data_t *source_data = obs_save_source(source);
 	obs_data_array_push_back(array, source_data);
 	obs_data_release(source_data);
+	return true;
 }
 
 void OBSBasic::RemoveSelectedScene()
@@ -3719,11 +3742,11 @@ void OBSBasic::RemoveSelectedScene()
 	}
 
 	/* ------------------------------ */
-	/* save all sources in scene tree */
+	/* save all sources in scene      */
 
 	obs_data_array_t *array = obs_data_array_create();
 
-	obs_source_enum_full_tree(source, save_undo_source_enum, array);
+	obs_scene_enum_items(scene, save_undo_source_enum, array);
 
 	obs_data_t *scene_data = obs_save_source(source);
 	obs_data_array_push_back(array, scene_data);
@@ -5498,14 +5521,22 @@ static bool remove_items(obs_scene_t *, obs_sceneitem_t *item, void *param)
 	return true;
 };
 
-OBSData OBSBasic::BackupScene(obs_source_t *scene_source)
+OBSData OBSBasic::BackupScene(obs_scene_t *scene,
+			      std::vector<obs_source_t *> *sources)
 {
 	obs_data_array_t *undo_array = obs_data_array_create();
 
-	obs_source_enum_full_tree(scene_source, save_undo_source_enum,
-				  undo_array);
+	if (!sources) {
+		obs_scene_enum_items(scene, save_undo_source_enum, undo_array);
+	} else {
+		for (obs_source_t *source : *sources) {
+			obs_data_t *source_data = obs_save_source(source);
+			obs_data_array_push_back(undo_array, source_data);
+			obs_data_release(source_data);
+		}
+	}
 
-	obs_data_t *scene_data = obs_save_source(scene_source);
+	obs_data_t *scene_data = obs_save_source(obs_scene_get_source(scene));
 	obs_data_array_push_back(undo_array, scene_data);
 	obs_data_release(scene_data);
 
@@ -5518,6 +5549,13 @@ OBSData OBSBasic::BackupScene(obs_source_t *scene_source)
 	return data;
 }
 
+static bool add_source_enum(obs_scene_t *, obs_sceneitem_t *item, void *p)
+{
+	auto sources = static_cast<std::vector<obs_source_t *> *>(p);
+	sources->push_back(obs_sceneitem_get_source(item));
+	return true;
+}
+
 void OBSBasic::CreateSceneUndoRedoAction(const QString &action_name,
 					 OBSData undo_data, OBSData redo_data)
 {
@@ -5525,9 +5563,10 @@ void OBSBasic::CreateSceneUndoRedoAction(const QString &action_name,
 		obs_data_t *base = obs_data_create_from_json(json.c_str());
 		obs_data_array_t *array = obs_data_get_array(base, "array");
 		std::vector<obs_source_t *> sources;
+		std::vector<obs_source_t *> old_sources;
 
 		/* create missing sources */
-		size_t count = obs_data_array_count(array);
+		const size_t count = obs_data_array_count(array);
 		sources.reserve(count);
 
 		for (size_t i = 0; i < count; i++) {
@@ -5537,12 +5576,16 @@ void OBSBasic::CreateSceneUndoRedoAction(const QString &action_name,
 			obs_source_t *source = obs_get_source_by_name(name);
 			if (!source)
 				source = obs_load_source(data);
+
 			sources.push_back(source);
 
 			/* update scene/group settings to restore their
-			 * contents to their saved settings */
-			if (obs_source_is_group(source) ||
-			    obs_source_is_scene(source)) {
+			* contents to their saved settings */
+			obs_scene_t *scene =
+				obs_group_or_scene_from_source(source);
+			if (scene) {
+				obs_scene_enum_items(scene, add_source_enum,
+						     &old_sources);
 				obs_data_t *scene_settings =
 					obs_data_get_obj(data, "settings");
 				obs_source_update(source, scene_settings);
@@ -5551,6 +5594,8 @@ void OBSBasic::CreateSceneUndoRedoAction(const QString &action_name,
 
 			obs_data_release(data);
 		}
+		for (obs_source_t *source : old_sources)
+			obs_source_addref(source);
 
 		/* actually load sources now */
 		for (obs_source_t *source : sources)
@@ -5558,6 +5603,8 @@ void OBSBasic::CreateSceneUndoRedoAction(const QString &action_name,
 
 		/* release sources */
 		for (obs_source_t *source : sources)
+			obs_source_release(source);
+		for (obs_source_t *source : old_sources)
 			obs_source_release(source);
 
 		obs_data_array_release(array);
@@ -5672,15 +5719,21 @@ void OBSBasic::MoveSceneItem(enum obs_order_movement movement,
 	if (!source)
 		return;
 
-	OBSSource scene_source = GetCurrentSceneSource();
-	OBSData undo_data = BackupScene(scene_source);
+	OBSScene scene = GetCurrentScene();
+	std::vector<obs_source_t *> sources;
+	if (scene != obs_sceneitem_get_scene(item))
+		sources.push_back(
+			obs_scene_get_source(obs_sceneitem_get_scene(item)));
+
+	OBSData undo_data = BackupScene(scene, &sources);
 
 	obs_sceneitem_set_order(item, movement);
 
 	const char *source_name = obs_source_get_name(source);
-	const char *scene_name = obs_source_get_name(scene_source);
+	const char *scene_name =
+		obs_source_get_name(obs_scene_get_source(scene));
 
-	OBSData redo_data = BackupScene(scene_source);
+	OBSData redo_data = BackupScene(scene, &sources);
 	CreateSceneUndoRedoAction(action_name.arg(source_name, scene_name),
 				  undo_data, redo_data);
 }
